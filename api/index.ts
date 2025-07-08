@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { handle } from 'hono/vercel'
 import type { Context } from 'hono'
 
+
 const app = new Hono().basePath("/api");
 
 app.use("*", async (c, next) => {
@@ -17,23 +18,28 @@ app.get("/", (c: Context) => {
     return c.json({ message: "Wordle API for Slack" })
 })
 
-app.get("/wordle/:field?", async (c: Context) => {
-    const field = c.req.param("field");
-
+async function getWord() {
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, "0");
     const day = String(now.getDate()).padStart(2, "0");
     const date = `${year}-${month}-${day}`;
 
+    const res = await fetch(`https://www.nytimes.com/svc/wordle/v2/${ date }.json`);
+
+    if (!res.ok) {
+        throw new Error(`Failed to fetch word: ${ res.status } ${ res.statusText }`);
+    }
+
+    const data = await res.json();
+    return { data, date };
+}
+
+
+app.get("/wordle/:field?", async (c: Context) => {
     try {
-        const res = await fetch(`https://www.nytimes.com/svc/wordle/v2/${date}.json`);
-
-        if (!res.ok) {
-            return c.json({ error: `Failed to fetch Wordle data for ${date}` }, 400);
-        }
-
-        const data = await res.json();
+        const field = c.req.param("field");
+        const { data, date } = await getWord();
 
         const allowedFields = {
             solution: data.solution,
@@ -46,12 +52,11 @@ app.get("/wordle/:field?", async (c: Context) => {
         }
 
         if (!(field in allowedFields)) {
-            return c.json({ error: `Invalid field requested: ${ field}` }, 400);
+            return c.json({ error: `Invalid field requested: ${field}` }, 400);
         }
 
         return c.json({ [field]: allowedFields[field as keyof typeof allowedFields] });
-    }
-    catch (error) {
+    } catch (error) {
         let errorMessage = "Internal Server Error";
 
         if (error instanceof Error) {
@@ -64,6 +69,8 @@ app.get("/wordle/:field?", async (c: Context) => {
         }, 500);
     }
 });
+
+
 
 
 const handler = handle(app);
