@@ -1,10 +1,11 @@
 {
-  "type": "module", 
+  "type": "module",
   "scripts": {
     "start": "vercel dev",
     "deploy": "vercel"
   },
   "dependencies": {
+    "@vercel/analytics": "^1.5.0",
     "hono": "^4.4.2"
   },
   "devDependencies": {
