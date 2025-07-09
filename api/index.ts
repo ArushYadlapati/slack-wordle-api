@@ -102,10 +102,21 @@ app.get("/wordle/:field?", async (c: Context) => {
 });
 
 app.get("/game", async (c: Context) => {
-    const baseUrl = new URL(c.req.url).origin;
-    const basePath = "/api/game";
 
-    return c.json({});
+    return c.json({
+        message: "Wordle Game API endpoints",
+        endpoints: [{
+                path: "/valid",
+                description: "Check if a word is valid (5 letters and in dictionary)",
+                usage: "GET /api/game/valid?word=WORDS"
+            },
+            {
+                path: "/check",
+                description: "Check a guess against today's word",
+                usage: "GET /api/game/check?word=WORDS"
+            }
+        ]
+    });
 })
 
 app.get("/game/valid", async (c: Context) => {
@@ -113,7 +124,7 @@ app.get("/game/valid", async (c: Context) => {
         let word = c.req.query("word");
 
         if (!word) {
-            return c.json({error: "Missing parameter"}, 400);
+            return c.json({error: "Missing parameter word"}, 400);
         }
 
         word = cleanWord(word);
@@ -124,7 +135,7 @@ app.get("/game/valid", async (c: Context) => {
             word,
             valid
         })
-        
+
     } catch (error) {
         error500Message(c, error as Error);
     }
@@ -132,19 +143,21 @@ app.get("/game/valid", async (c: Context) => {
 
 app.get("/game/check", async (c: Context) => {
     try {
-        let guess = c.req.query("guess");
+        let word = c.req.query("word") || "" ;
 
-        if (!guess) {
-            return c.json({error: "Missing parameter"}, 400);
+        word = cleanWord(word);
+
+        if (!word) {
+            return c.json({error: "Missing parameter word"}, 400);
         }
 
-        guess = cleanWord(guess);
+        word = cleanWord(word);
 
         const solution = (await getWord()).data.solution.toLowerCase();
 
         const result: number[] = [];
         const sL = solution.split("")
-        const gL = guess.split("");
+        const gL = word.split("");
         const sY = new Array(5).fill(false);
 
         for (let i = 0; i < 5; i++) {
@@ -169,7 +182,7 @@ app.get("/game/check", async (c: Context) => {
         }
 
         return c.json({
-            guess,
+            guess: word,
             solution,
             result
         })
