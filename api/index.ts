@@ -51,6 +51,20 @@ async function getValidWords() {
         .map(word => word.trim().toLowerCase());
 }
 
+function cleanWord(word: string) {
+    word = word.toLowerCase().trim();
+
+    if (word.length !== 5) {
+        throw new Error("Guess parameter length is invalid: 400");
+    }
+
+    if (!/^[a-z]+$/.test(word)) {
+        throw new Error("Guess must contain only letters: 400");
+    }
+
+    return word;
+}
+
 function error500Message(c: Context, error: Error) {
     let errorMessage = "Internal Server Error";
 
@@ -102,7 +116,14 @@ app.get("/game/valid", async (c: Context) => {
             return c.json({error: "Missing parameter"}, 400);
         }
 
-        word = word.toLowerCase().trim();
+        word = cleanWord(word);
+
+        const valid = (await getValidWords()).includes(word);
+
+        return c.json({
+            word,
+            valid
+        })
         
     } catch (error) {
         error500Message(c, error as Error);
@@ -117,15 +138,7 @@ app.get("/game/check", async (c: Context) => {
             return c.json({error: "Missing parameter"}, 400);
         }
 
-        guess = guess.toLowerCase().trim();
-
-        if (guess.length !== 5) {
-            return c.json({}, 400);
-        }
-
-        if (!/^[a-z]+$/.test(guess)) {
-            return c.json({}, 400);
-        }
+        guess = cleanWord(guess);
 
         const solution = (await getWord()).data.solution.toLowerCase();
 
