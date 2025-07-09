@@ -1,9 +1,14 @@
 import { Hono } from "hono"
 import { handle } from "hono/vercel"
+import { cors } from 'hono/cors'
 import type { Context } from "hono"
 
-
 const app = new Hono().basePath("/api");
+
+app.use('*', cors({
+    origin: '*',
+    allowMethods: ['GET', 'POST', 'OPTIONS'],
+}))
 
 app.use("*", async (c, next) => {
     const url = new URL(c.req.url);
