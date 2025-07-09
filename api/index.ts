@@ -18,48 +18,24 @@ app.get("/", (c: Context) => {
     return c.json({ message: "Wordle API for Slack " })
 })
 
-async function getWord(userTimezone?: string) {
-    let now: Date;
+async function getWord() {
+    const now = new Date();
+    const userTimezoneOffset = now.getTimezoneOffset();
+    const adjustedDate = new Date(now.getTime() - userTimezoneOffset * 60 * 1000);
 
-    if (userTimezone) {
-        const formatter = new Intl.DateTimeFormat("en-CA", {
-            timeZone: userTimezone,
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit"
-        });
+    const year = adjustedDate.getUTCFullYear();
+    const month = String(adjustedDate.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(adjustedDate.getUTCDate()).padStart(2, "0");
+    const date = `${ year }-${ month }-${ day }`;
 
-        const parts = formatter.formatToParts(new Date());
-        const year = parts.find(p => p.type === "year")?.value;
-        const month = parts.find(p => p.type === "month")?.value;
-        const day = parts.find(p => p.type === "day")?.value;
+    const res = await fetch(`https://www.nytimes.com/svc/wordle/v2/${ date }.json`);
 
-        const date = `${ year }-${ month }-${ day }`;
-
-        const res = await fetch(`https://www.nytimes.com/svc/wordle/v2/${date}.json`);
-
-        if (!res.ok) {
-            throw new Error(`Failed to fetch word: ${ res.status } ${ res.statusText }`);
-        }
-
-        const data = await res.json();
-        return { data, date };
-    } else {
-        now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, "0");
-        const day = String(now.getDate()).padStart(2, "0");
-        const date = `${ year }-${ month }-${ day }`;
-
-        const res = await fetch(`https://www.nytimes.com/svc/wordle/v2/${date}.json`);
-
-        if (!res.ok) {
-            throw new Error(`Failed to fetch word: ${ res.status } ${ res.statusText }`);
-        }
-
-        const data = await res.json();
-        return { data, date };
+    if (!res.ok) {
+        throw new Error(`Failed to fetch word: ${ res.status } ${ res.statusText }`);
     }
+
+    const data = await res.json();
+    return { data, date };
 }
 
 async function getValidWords() {
@@ -113,8 +89,7 @@ function handleError(c: Context, error: Error) {
 app.get("/wordle/:field?", async (c: Context) => {
     try {
         const field = c.req.param("field");
-        const userTimezone = c.req.query("timezone");
-        const { data } = await getWord(userTimezone);
+        const { data } = await getWord();
 
         const allowedFields = {
             solution: data.solution,
@@ -187,7 +162,7 @@ app.get("/game/check", async (c: Context) => {
         word = cleanWord(word);
 
         const userTimezone = c.req.query("timezone");
-        const solution = (await getWord(userTimezone)).data.solution.toLowerCase();
+        const solution = (await getWord()).data.solution.toLowerCase();
 
         const result: number[] = [];
         const sL = solution.split("")
