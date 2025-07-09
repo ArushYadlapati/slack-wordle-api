@@ -18,12 +18,15 @@ app.get("/", (c: Context) => {
     return c.json({ message: "Wordle API for Slack" })
 })
 
-async function getWord() {
-    const now = new Date();
+async function getWord(userTimezone?: string) {
+    const now = userTimezone ?
+        new Date(new Date().toLocaleString("en-US", { timeZone: userTimezone })) :
+        new Date();
+
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, "0");
     const day = String(now.getDate()).padStart(2, "0");
-    const date = `${year}-${month}-${day}`;
+    const date = `${ year }-${ month }-${ day }`;
 
     const res = await fetch(`https://www.nytimes.com/svc/wordle/v2/${ date }.json`);
 
@@ -65,7 +68,15 @@ function cleanWord(word: string) {
     return word;
 }
 
-function error500Message(c: Context, error: Error) {
+function handleError(c: Context, error: Error) {
+    if (error.message.includes(": 400")) {
+        const message = error.message.replace(": 400", "");
+        return c.json({
+            error: "Bad Request",
+            details: message
+        }, 400);
+    }
+
     let errorMessage = "Internal Server Error";
 
     errorMessage += " " + error.message;
@@ -79,7 +90,8 @@ function error500Message(c: Context, error: Error) {
 app.get("/wordle/:field?", async (c: Context) => {
     try {
         const field = c.req.param("field");
-        const { data, date } = await getWord();
+        const userTimezone = c.req.query("timezone");
+        const { data } = await getWord(userTimezone);
 
         const allowedFields = {
             solution: data.solution,
@@ -97,7 +109,7 @@ app.get("/wordle/:field?", async (c: Context) => {
 
         return c.json({ [field]: allowedFields[field as keyof typeof allowedFields] });
     } catch (error) {
-        error500Message(c, error as Error);
+        return handleError(c, error as Error);
     }
 });
 
@@ -137,7 +149,7 @@ app.get("/game/valid", async (c: Context) => {
         })
 
     } catch (error) {
-        error500Message(c, error as Error);
+        return handleError(c, error as Error);
     }
 })
 
@@ -145,15 +157,14 @@ app.get("/game/check", async (c: Context) => {
     try {
         let word = c.req.query("word") || "" ;
 
-        word = cleanWord(word);
-
         if (!word) {
             return c.json({error: "Missing parameter word"}, 400);
         }
 
         word = cleanWord(word);
 
-        const solution = (await getWord()).data.solution.toLowerCase();
+        const userTimezone = c.req.query("timezone");
+        const solution = (await getWord(userTimezone)).data.solution.toLowerCase();
 
         const result: number[] = [];
         const sL = solution.split("")
@@ -183,12 +194,12 @@ app.get("/game/check", async (c: Context) => {
 
         return c.json({
             guess: word,
-            solution,
+            correct: solution === word,
             result
         })
 
     } catch (error) {
-        error500Message(c, error as Error);
+        return handleError(c, error as Error);
     }
 })
 
