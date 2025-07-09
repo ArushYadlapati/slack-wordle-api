@@ -1,0 +1,31 @@
+{
+    "display_information": {
+        "name": "Wordle"
+    },
+
+    "features": {
+        "bot_user": {
+            "display_name": "Wordle"
+        }
+    },
+
+    "settings": {
+        "org_deploy_enabled": false,
+        "socket_mode_enabled": false,
+        "is_hosted": false,
+        "token_rotation_enabled": false
+      },
+
+    "oauth_config": {
+        "scopes": {
+            "bot": [
+                "channels:history",
+                "groups:history",
+                "im:history",
+                "mpim:history",
+                "chat:write",
+                "chat:write.public"
+            ]
+        }
+    }
+}

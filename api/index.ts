@@ -15,17 +15,33 @@ app.use("*", async (c, next) => {
 })
 
 app.get("/", (c: Context) => {
-    return c.json({ message: "Wordle API for Slack " })
+    return c.json({
+        message: "Wordle API for Slack"
+    });
 })
 
-async function getWord() {
-    const now = new Date();
-    const userTimezoneOffset = now.getTimezoneOffset();
-    const adjustedDate = new Date(now.getTime() - userTimezoneOffset * 60 * 1000);
+async function getWord(timestamp?: string | number | Date) {
+    let now: Date;
 
-    const year = adjustedDate.getUTCFullYear();
-    const month = String(adjustedDate.getUTCMonth() + 1).padStart(2, "0");
-    const day = String(adjustedDate.getUTCDate()).padStart(2, "0");
+    if (timestamp) {
+        if (typeof timestamp === "string" || typeof timestamp === "number") {
+            const ts = new Date(Number.isNaN(+timestamp) ? timestamp : +timestamp);
+            if (isNaN(ts.getTime())) {
+                throw new Error("Invalid timestamp format: 400");
+            }
+            now = ts
+        } else if (timestamp instanceof Date) {
+            now = timestamp;
+        } else {
+            throw new Error("Invalid timestamp parameter type: 400");
+        }
+    } else {
+        now = new Date();
+    }
+
+    const year = now.getUTCFullYear();
+    const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(now.getUTCDate()).padStart(2, "0");
     const date = `${ year }-${ month }-${ day }`;
 
     const res = await fetch(`https://www.nytimes.com/svc/wordle/v2/${ date }.json`);
@@ -50,8 +66,8 @@ async function getValidWords() {
     return (await res.text())
         .split("\n")
         .map((word) => word.trim())
-        .filter((word) => word.trim() !== "")
-        .map(word => word.trim().toLowerCase());
+        .filter((word) => word !== "")
+        .map((word) => word.toLowerCase());
 }
 
 function cleanWord(word: string) {
@@ -89,7 +105,8 @@ function handleError(c: Context, error: Error) {
 app.get("/wordle/:field?", async (c: Context) => {
     try {
         const field = c.req.param("field");
-        const { data } = await getWord();
+        const timestamp = c.req.query("timestamp");
+        const { data } = await getWord(timestamp);
 
         const allowedFields = {
             solution: data.solution,
@@ -102,10 +119,16 @@ app.get("/wordle/:field?", async (c: Context) => {
         }
 
         if (!(field in allowedFields)) {
-            return c.json({ error: `Invalid field requested: ${ field }` }, 400);
+            return c.json({
+                error: `Invalid field requested: ${ field }`
+            }, 400);
         }
 
-        return c.json({ [field]: allowedFields[field as keyof typeof allowedFields] });
+        return c.json({
+            [field]: allowedFields[
+                field as keyof typeof allowedFields
+            ]
+        });
     } catch (error) {
         return handleError(c, error as Error);
     }
@@ -134,7 +157,9 @@ app.get("/game/valid", async (c: Context) => {
         let word = c.req.query("word");
 
         if (!word) {
-            return c.json({error: "Missing parameter word"}, 400);
+            return c.json({
+                error: "Missing parameter word"
+            }, 400);
         }
 
         word = cleanWord(word);
@@ -144,8 +169,7 @@ app.get("/game/valid", async (c: Context) => {
         return c.json({
             word,
             valid
-        })
-
+        });
     } catch (error) {
         return handleError(c, error as Error);
     }
@@ -153,7 +177,8 @@ app.get("/game/valid", async (c: Context) => {
 
 app.get("/game/check", async (c: Context) => {
     try {
-        let word = c.req.query("word") || "" ;
+        let word = c.req.query("word") || "";
+        const timestamp = c.req.query("timestamp");
 
         if (!word) {
             return c.json({ error: "Missing parameter word" }, 400);
@@ -161,11 +186,10 @@ app.get("/game/check", async (c: Context) => {
 
         word = cleanWord(word);
 
-        const userTimezone = c.req.query("timezone");
-        const solution = (await getWord()).data.solution.toLowerCase();
+        const solution = (await getWord(timestamp)).data.solution.toLowerCase();
 
         const result: number[] = [];
-        const sL = solution.split("")
+        const sL = solution.split("");
         const gL = word.split("");
         const sY = new Array(5).fill(false);
 
@@ -195,8 +219,9 @@ app.get("/game/check", async (c: Context) => {
             correct: solution === word,
             result
         })
+    }
 
-    } catch (error) {
+    catch (error) {
         return handleError(c, error as Error);
     }
 })
