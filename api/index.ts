@@ -5,9 +5,9 @@ import type { Context } from "hono"
 
 const app = new Hono().basePath("/api");
 
-app.use('*', cors({
-    origin: '*',
-    allowMethods: ['GET', 'POST', 'OPTIONS'],
+app.use("*", cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "PATCH", "PUT", "OPTIONS"],
 }))
 
 app.use("*", async (c, next) => {
@@ -21,7 +21,18 @@ app.use("*", async (c, next) => {
 
 app.get("/", (c: Context) => {
     return c.json({
-        message: "Wordle API for Slack"
+        message: "Wordle Game API",
+        endpoints: [{
+                path: "api/wordle",
+                description: "API Methods to get basic Wordle info",
+                usage: "GET /api/wordle?timestamp=yyyy-mm-dd"
+            },
+            {
+                path: "api/game",
+                description: "API Methods for the Wordle Game",
+                usage: "GET /api/game"
+            }
+        ]
     });
 })
 
@@ -150,7 +161,7 @@ app.get("/game", async (c: Context) => {
             },
             {
                 path: "/check",
-                description: "Check a guess against today's word",
+                description: "Check a guess against today's Wordle solution (default timezone is UTC)",
                 usage: "GET /api/game/check?word=WORDS"
             }
         ]
