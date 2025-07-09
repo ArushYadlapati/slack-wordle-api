@@ -1,6 +1,6 @@
-import { Hono } from 'hono'
-import { handle } from 'hono/vercel'
-import type { Context } from 'hono'
+import { Hono } from "hono"
+import { handle } from "hono/vercel"
+import type { Context } from "hono"
 
 
 const app = new Hono().basePath("/api");
@@ -15,27 +15,51 @@ app.use("*", async (c, next) => {
 })
 
 app.get("/", (c: Context) => {
-    return c.json({ message: "Wordle API for Slack" })
+    return c.json({ message: "Wordle API for Slack " })
 })
 
 async function getWord(userTimezone?: string) {
-    const now = userTimezone ?
-        new Date(new Date().toLocaleString("en-US", { timeZone: userTimezone })) :
-        new Date();
+    let now: Date;
 
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
-    const date = `${ year }-${ month }-${ day }`;
+    if (userTimezone) {
+        const formatter = new Intl.DateTimeFormat("en-CA", {
+            timeZone: userTimezone,
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit"
+        });
 
-    const res = await fetch(`https://www.nytimes.com/svc/wordle/v2/${ date }.json`);
+        const parts = formatter.formatToParts(new Date());
+        const year = parts.find(p => p.type === "year")?.value;
+        const month = parts.find(p => p.type === "month")?.value;
+        const day = parts.find(p => p.type === "day")?.value;
 
-    if (!res.ok) {
-        throw new Error(`Failed to fetch word: ${ res.status } ${ res.statusText }`);
+        const date = `${ year }-${ month }-${ day }`;
+
+        const res = await fetch(`https://www.nytimes.com/svc/wordle/v2/${date}.json`);
+
+        if (!res.ok) {
+            throw new Error(`Failed to fetch word: ${ res.status } ${ res.statusText }`);
+        }
+
+        const data = await res.json();
+        return { data, date };
+    } else {
+        now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, "0");
+        const day = String(now.getDate()).padStart(2, "0");
+        const date = `${ year }-${ month }-${ day }`;
+
+        const res = await fetch(`https://www.nytimes.com/svc/wordle/v2/${date}.json`);
+
+        if (!res.ok) {
+            throw new Error(`Failed to fetch word: ${ res.status } ${ res.statusText }`);
+        }
+
+        const data = await res.json();
+        return { data, date };
     }
-
-    const data = await res.json();
-    return { data, date };
 }
 
 async function getValidWords() {
@@ -77,8 +101,7 @@ function handleError(c: Context, error: Error) {
         }, 400);
     }
 
-    let errorMessage = "Internal Server Error";
-
+    let errorMessage = "Internal Server Error: 500";
     errorMessage += " " + error.message;
 
     return c.json({
@@ -104,7 +127,7 @@ app.get("/wordle/:field?", async (c: Context) => {
         }
 
         if (!(field in allowedFields)) {
-            return c.json({ error: `Invalid field requested: ${field}` }, 400);
+            return c.json({ error: `Invalid field requested: ${ field }` }, 400);
         }
 
         return c.json({ [field]: allowedFields[field as keyof typeof allowedFields] });
@@ -158,7 +181,7 @@ app.get("/game/check", async (c: Context) => {
         let word = c.req.query("word") || "" ;
 
         if (!word) {
-            return c.json({error: "Missing parameter word"}, 400);
+            return c.json({ error: "Missing parameter word" }, 400);
         }
 
         word = cleanWord(word);
