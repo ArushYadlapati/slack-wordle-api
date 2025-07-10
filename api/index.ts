@@ -1,6 +1,6 @@
 import { Hono } from "hono"
 import { handle } from "hono/vercel"
-import { cors } from 'hono/cors'
+import { cors } from "hono/cors"
 import type { Context } from "hono"
 
 const app = new Hono().basePath("/api");
@@ -100,6 +100,32 @@ function cleanWord(word: string) {
     return word;
 }
 
+function checkWord(gL: string[], sL: string[], sY: boolean[]) {
+    let result: number[] = [];
+    for (let i = 0; i < 5; i++) {
+        if (gL[i] === sL[i]) {
+            result[i] = 0;
+            sY[i] = true;
+        } else {
+            result[i] = 2;
+        }
+    }
+
+    for (let i = 0; i < 5; i++) {
+        if (result[i] === 2) {
+            for (let j = 0; j < 5; j++) {
+                if (!sY[j] && gL[i] === sL[j]) {
+                    result[i] = 1;
+                    sY[j] = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
 function handleError(c: Context, error: Error) {
     if (error.message.includes(": 400")) {
         const message = error.message.replace(": 400", "");
@@ -162,7 +188,12 @@ app.get("/game", async (c: Context) => {
             {
                 path: "/check",
                 description: "Check a guess against today's Wordle solution (default timezone is UTC)",
-                usage: "GET /api/game/check?word=WORDS"
+                usage: "GET /api/game/check?word=WORDS&timestamp=yyyy-mm-dd"
+            },
+            {
+                path: "/playGame",
+                description: "Shows a current Wordle game with previous guesses",
+                usage: "GET /api/game/playGame?word=WORDS&guesses=[[0,1,2,1,0],[2,2,1,0,0]]&timestamp=yyyy-mm-dd"
             }
         ]
     });
@@ -197,38 +228,20 @@ app.get("/game/check", async (c: Context) => {
         const timestamp = c.req.query("timestamp");
 
         if (!word) {
-            return c.json({ error: "Missing parameter word" }, 400);
+            return c.json({
+                error: "Missing parameter word"
+            }, 400);
         }
 
         word = cleanWord(word);
 
         const solution = (await getWord(timestamp)).data.solution.toLowerCase();
 
-        const result: number[] = [];
         const sL = solution.split("");
         const gL = word.split("");
         const sY = new Array(5).fill(false);
 
-        for (let i = 0; i < 5; i++) {
-            if (gL[i] === sL[i]) {
-                result[i] = 0;
-                sY[i] = true;
-            } else {
-                result[i] = 2;
-            }
-        }
-
-        for (let i = 0; i < 5; i++) {
-            if (result[i] === 2) {
-                for (let j = 0; j < 5; j++) {
-                    if (!sY[j] && gL[i] === sL[j]) {
-                        result[i] = 1;
-                        sY[j] = true;
-                        break;
-                    }
-                }
-            }
-        }
+        const result = checkWord(gL, sL, sY);
 
         return c.json({
             guess: word,
@@ -241,6 +254,63 @@ app.get("/game/check", async (c: Context) => {
         return handleError(c, error as Error);
     }
 })
+
+app.get("/game/playGame", async (c: Context) => {
+    try {
+        let word = c.req.query("word") || "";
+        const prevGuesses = c.req.query("guesses") || "";
+        const timestamp = c.req.query("timestamp");
+
+        if (!word) {
+            return c.json({
+                error: "Missing parameter `word`"
+            }, 400);
+        }
+
+        if (!prevGuesses) {
+            return c.json({
+                error: "Missing parameter `guesses`"
+            }, 400);
+        }
+
+        let guesses: number[][];
+
+        try {
+            guesses = JSON.parse(prevGuesses as string);
+        } catch (parseError) {
+            return c.json({
+                error: "Parameter `guesses` should be a JSON array."
+            }, 400);
+        }
+
+        if (!Array.isArray(guesses) || !guesses.every(row => Array.isArray(row))) {
+            return c.json({
+                error: "Parameter `guesses` should be a 2D array."
+            }, 400);
+        }
+
+        word = cleanWord(word);
+
+        const solution = (await getWord(timestamp)).data.solution.toLowerCase();
+
+        const sL = solution.split("");
+        const gL = word.split("");
+        const sY = new Array(5).fill(false);
+
+        const result = checkWord(gL, sL, sY);
+
+        const updatedGuesses = [...guesses, result];
+
+        return c.json({
+            guesses: updatedGuesses,
+            currentGuess: result,
+            isComplete: result.every(r => r === 0)
+        });
+
+    } catch (error) {
+        return handleError(c, error as Error);
+    }
+});
 
 const handler = handle(app);
 
