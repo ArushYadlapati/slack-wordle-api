@@ -2,8 +2,26 @@ import { Hono } from "hono"
 import { handle } from "hono/vercel"
 import { cors } from "hono/cors"
 import type { Context } from "hono"
+import { MongoClient } from "mongodb"
 
 const app = new Hono().basePath("/api");
+
+const MONGO_URI = process.env.MONGO_URI || "";
+const DB_NAME = process.env.MONGO_DB_NAME || "";
+const COLLECTION_NAME = process.env.MONGO_URI || "";
+
+let mongoClient: MongoClient | null = null;
+async function getMongoClient() {
+    if (!mongoClient) {
+        mongoClient = new MongoClient(MONGO_URI);
+        await mongoClient.connect();
+    }
+    return mongoClient;
+}
+async function getLeaderboardCollection() {
+    const client = await getMongoClient();
+    return client.db(DB_NAME).collection(COLLECTION_NAME);
+}
 
 app.use("*", cors({
     origin: "*",
@@ -32,6 +50,21 @@ app.get("/", (c: Context) => {
                 path: "api/game",
                 description: "API Methods for the Wordle Game",
                 usage: "GET /api/game"
+            },
+            {
+                path: "api/game/leaderboard/viewAll",
+                description: "View top 5 leaderboard scores for the day",
+                usage: "GET /api/game/leaderboard/viewAll?timestamp=yyyy-mm-dd"
+            },
+            {
+                path: "api/game/leaderboard/view",
+                description: "View the current user's score for the day",
+                usage: "GET /api/game/leaderboard/view?userId=USER_ID&timestamp=yyyy-mm-dd"
+            },
+            {
+                path: "api/game/leaderboard/add",
+                description: "Add a score to the leaderboard",
+                usage: "POST /api/game/leaderboard/add"
             }
         ]
     });
@@ -168,6 +201,125 @@ function handleError(c: Context, error: Error) {
     }, 500);
 }
 
+export function calculateScore(guesses: number[][]): number {
+    // If user never gets any correct (all squares always 2), return 0
+    let hasAnyGreen = false;
+    let totalGreen = 0;
+    let totalYellow = 0;
+
+    for (const guess of guesses) {
+        for (const val of guess) {
+            if (val === 0) {
+                hasAnyGreen = true;
+                totalGreen += 1;
+            }
+            if (val === 1) {
+                totalYellow += 1;
+            }
+        }
+    }
+
+    if (!hasAnyGreen) {
+        return 0;
+    }
+
+    let winIndex = guesses.findIndex(g => g.every(x => x === 0));
+    if (winIndex !== -1) {
+        switch (winIndex + 1) {
+            case 1: return 1000;
+            case 2: return 900;
+            case 3: return 800;
+            case 4: return 700;
+            case 5: return 600;
+            case 6: return 500;
+            default: return 500 - (winIndex + 1 - 6) * 50;
+        }
+    }
+    let partial = totalGreen * 10 + totalYellow * 4;
+    return Math.min(partial, 400);
+}
+
+app.get("/game/leaderboard/viewAll", async (c: Context) => {
+    try {
+        const timestamp = c.req.query("timestamp");
+        const { date } = await getWord(timestamp); // This normalizes the date
+
+        const collection = await getLeaderboardCollection();
+        const scores = await collection
+            .find({ date })
+            .sort({ score: -1 })
+            .limit(5)
+            .toArray();
+
+        return c.json({
+            date,
+            leaderboard: scores.map(({ userId, score, guesses }) => ({
+                userId,
+                score,
+                guessesCount: guesses.length,
+            }))
+        });
+    } catch (error) {
+        return handleError(c, error as Error);
+    }
+});
+
+app.get("/game/leaderboard/view", async (c: Context) => {
+    try {
+        const userId = c.req.query("userId");
+        if (!userId) {
+            return c.json({ error: "Missing parameter userId" }, 400);
+        }
+        const timestamp = c.req.query("timestamp");
+        const { date } = await getWord(timestamp);
+
+        const collection = await getLeaderboardCollection();
+        const entry = await collection.findOne({ date, userId });
+
+        if (!entry) {
+            return c.json({ userId, date, score: null, guesses: null, message: "No score found" });
+        }
+
+        return c.json({
+            userId,
+            date,
+            score: entry.score,
+            guesses: entry.guesses
+        });
+    } catch (error) {
+        return handleError(c, error as Error);
+    }
+});
+
+app.post("/game/leaderboard/add", async (c: Context) => {
+    try {
+        const { userId, guesses, timestamp } = await c.req.json();
+
+        if (!userId || !guesses || !Array.isArray(guesses)) {
+            return c.json({ error: "Missing parameters. Required: userId, guesses (number[][])" }, 400);
+        }
+        const { date } = await getWord(timestamp);
+
+        const score = calculateScore(guesses);
+
+        const collection = await getLeaderboardCollection();
+        await collection.updateOne(
+            { userId, date },
+            { $set: { userId, date, score, guesses } },
+            { upsert: true }
+        );
+
+        return c.json({
+            message: "Score added/updated.",
+            userId,
+            date,
+            score
+        });
+    } catch (error) {
+        return handleError(c, error as Error);
+    }
+});
+
 app.get("/wordle/:field?", async (c: Context) => {
     try {
         const field = c.req.param("field");
@@ -193,7 +345,7 @@ app.get("/wordle/:field?", async (c: Context) => {
         return c.json({
             [field]: allowedFields[
                 field as keyof typeof allowedFields
-            ]
+                ]
         });
     } catch (error) {
         return handleError(c, error as Error);
@@ -219,6 +371,21 @@ app.get("/game", async (c: Context) => {
                 path: "/playGame",
                 description: "Shows a current Wordle game with previous guesses",
                 usage: "GET /api/game/playGame?word=WORDS&guesses=[[0,1,2,1,0],[2,2,1,0,0]]&timestamp=yyyy-mm-dd"
+            },
+            {
+                path: "/leaderboard/viewAll",
+                description: "View top 5 scores for the day",
+                usage: "GET /api/game/leaderboard/viewAll?timestamp=yyyy-mm-dd"
+            },
+            {
+                path: "/leaderboard/view",
+                description: "View current user's score",
+                usage: "GET /api/game/leaderboard/view?userId=USER_ID&timestamp=yyyy-mm-dd"
+            },
+            {
+                path: "/leaderboard/add",
+                description: "Add a score to leaderboard",
+                usage: "POST /api/game/leaderboard/add"
             }
         ]
     });
