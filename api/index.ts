@@ -22,6 +22,7 @@ app.use("*", async (c, next) => {
 app.get("/", (c: Context) => {
     return c.json({
         message: "Wordle Game API",
+        timezone: "America/Los_Angeles (PST/PDT, UTC-8 by default)",
         endpoints: [{
                 path: "api/wordle",
                 description: "API Methods to get basic Wordle info",
@@ -37,28 +38,51 @@ app.get("/", (c: Context) => {
 })
 
 async function getWord(timestamp?: string | number | Date) {
-    let now: Date;
+    let date: string;
 
     if (timestamp) {
-        if (typeof timestamp === "string" || typeof timestamp === "number") {
-            const ts = new Date(Number.isNaN(+timestamp) ? timestamp : +timestamp);
-            if (isNaN(ts.getTime())) {
-                throw new Error("Invalid timestamp format: 400");
+        if (typeof timestamp === "string" && /^\d{4}-\d{2}-\d{2}$/.test(timestamp)) {
+            date = timestamp;
+        } else if (typeof timestamp === "string" || typeof timestamp === "number") {
+            const newTimestamp = new Date(Number.isNaN(+timestamp) ? timestamp : +timestamp);
+
+            if (isNaN(newTimestamp.getTime())) {
+                throw new Error("Timestamp parameter format is invalid: 400");
             }
-            now = ts
+
+            const options: Intl.DateTimeFormatOptions = {
+                timeZone: "America/Los_Angeles",
+                year: "numeric", month: "2-digit", day: "2-digit"
+            };
+            const [month, day, year] = new Intl.DateTimeFormat("en-US", options)
+                .format(newTimestamp)
+                .split("/");
+            date = `${ year }-${ month.padStart(2, "0") }-${ day.padStart(2, "0") }`;
         } else if (timestamp instanceof Date) {
-            now = timestamp;
+            const options: Intl.DateTimeFormatOptions = {
+                timeZone: "America/Los_Angeles",
+                year: "numeric", month: "2-digit", day: "2-digit"
+            };
+            const [month, day, year] = new Intl.DateTimeFormat("en-US", options)
+                .format(timestamp)
+                .split("/");
+            date = `${ year }-${ month.padStart(2, "0") }-${ day.padStart(2, "0") }`;
         } else {
             throw new Error("Invalid timestamp parameter type: 400");
         }
     } else {
-        now = new Date();
+        const now = new Date();
+        const options: Intl.DateTimeFormatOptions = {
+            timeZone: "America/Los_Angeles",
+            year: "numeric", month: "2-digit", day: "2-digit"
+        };
+        const [month, day, year] = new Intl.DateTimeFormat("en-US", options)
+            .format(now)
+            .split("/");
+        date = `${ year }-${ month.padStart(2, "0") }-${ day.padStart(2, "0") }`;
     }
 
-    const year = now.getUTCFullYear();
-    const month = String(now.getUTCMonth() + 1).padStart(2, "0");
-    const day = String(now.getUTCDate()).padStart(2, "0");
-    const date = `${ year }-${ month }-${ day }`;
+
 
     const res = await fetch(`https://www.nytimes.com/svc/wordle/v2/${ date }.json`);
 
@@ -180,6 +204,7 @@ app.get("/game", async (c: Context) => {
 
     return c.json({
         message: "Wordle Game API endpoints",
+        timezone: "America/Los_Angeles (PST/PDT/UTC-8 by default)",
         endpoints: [{
                 path: "/valid",
                 description: "Check if a word is valid (5 letters and in dictionary)",
@@ -187,7 +212,7 @@ app.get("/game", async (c: Context) => {
             },
             {
                 path: "/check",
-                description: "Check a guess against today's Wordle solution (default timezone is UTC)",
+                description: "Check a guess against today's Wordle solution (default timezone is PST/PDT/UTC-8)",
                 usage: "GET /api/game/check?word=WORDS&timestamp=yyyy-mm-dd"
             },
             {
