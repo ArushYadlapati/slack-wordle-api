@@ -286,11 +286,7 @@ app.post("/slack-guess", async (c: Context) => {
                 type: "section",
                 text: {
                     type: "mrkdwn",
-                    text: {
-                        type: "mrkdwn",
-                        text: "```\n" + lettersLine + "\n" + squaresLine + "\n```"
-                    }
-
+                    text: `${squaresLine}`
                 }
             };
         });
