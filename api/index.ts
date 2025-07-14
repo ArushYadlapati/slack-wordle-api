@@ -4,7 +4,7 @@ import { cors } from "hono/cors"
 import type { Context } from "hono"
 import { MongoClient } from "mongodb"
 
-import schedule from "node-schedule"
+// import schedule from "node-schedule"
 
 import dotenv from 'dotenv';
 dotenv.config({
@@ -12,6 +12,38 @@ dotenv.config({
 });
 
 const app = new Hono().basePath("/api");
+
+app.use("*", cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "PATCH", "PUT", "OPTIONS"],
+}))
+
+app.use("*", async (c, next) => {
+    const url = new URL(c.req.url);
+    if (url.pathname !== "/" && url.pathname.endsWith("/")) {
+        url.pathname = url.pathname.slice(0, -1);
+        return c.redirect(url.toString(), 308);
+    }
+    await next();
+})
+
+app.get("/", (c: Context) => {
+    return c.json({
+        message: "Wordle Game API",
+        timezone: "America/Los_Angeles (PST/PDT, UTC-8 by default)",
+            endpoints: [{
+                path: "api/wordle",
+                description: "API Methods to get basic Wordle info",
+                usage: "GET /api/wordle?timestamp=yyyy-mm-dd"
+            },
+            {
+                path: "api/game",
+                description: "API Methods for the Wordle Game",
+                usage: "GET /api/game"
+            }
+        ]
+    });
+})
 
 const MONGO_LEADERBOARD_URI = process.env.MONGO_LEADERBOARD_URI || "";
 const MONGO_LEADERBOARD_DB_NAME = process.env.MONGO_LEADERBOARD_DB_NAME || "";
@@ -42,44 +74,6 @@ async function getUsersCollection() {
     }
     return mongoUsersClient.db(MONGO_USERS_DB_NAME).collection(MONGO_USERS_COLLECTION_NAME);
 }
-
-// --- Scheduled DB clearing at PST midnight ---
-schedule.scheduleJob("0 0 * * *", { tz: "America/Los_Angeles" }, async () => {
-    try {
-        if (mongoClient) {
-            const leaderboardCol = await getLeaderboardCollection();
-            await leaderboardCol.deleteMany({});
-        }
-        if (mongoUsersClient) {
-            const usersCol = await getUsersCollection();
-            await usersCol.deleteMany({});
-        }
-        console.log("Leaderboard and users DBs cleared at PST midnight.");
-    } catch (e) {
-        console.error("Failed to clear DBs at PST midnight.", e);
-    }
-});
-
-app.use("*", cors({
-    origin: "*",
-    allowMethods: ["GET", "POST", "PATCH", "PUT", "OPTIONS"],
-}))
-
-app.use("*", async (c, next) => {
-    const url = new URL(c.req.url);
-    if (url.pathname !== "/" && url.pathname.endsWith("/")) {
-        url.pathname = url.pathname.slice(0, -1);
-        return c.redirect(url.toString(), 308);
-    }
-    await next();
-})
-
-app.get("/", (c: Context) => {
-    return c.json({
-        message: "Wordle Game API",
-        timezone: "America/Los_Angeles (PST/PDT, UTC-8 by default)",
-    });
-})
 
 // --- Utility functions for wordle logic (unchanged) ---
 async function getWord(timestamp?: string | number | Date) {
@@ -307,7 +301,6 @@ app.post("/slack-guess", async (c: Context) => {
     }
 });
 
-// --- (Other endpoints remain unchanged, including leaderboard/viewAll etc) ---
 
 app.get("/game/leaderboard/viewAll", async (c: Context) => {
     try {
@@ -390,7 +383,174 @@ app.post("/game/leaderboard/add", async (c: Context) => {
     }
 });
 
-// (Other endpoints such as /game/check, /game/valid, etc. unchanged...)
+app.get("/wordle/:field?", async (c: Context) => {
+    try {
+        const field = c.req.param("field");
+        const timestamp = c.req.query("timestamp");
+        const { data } = await getWord(timestamp);
+
+        const allowedFields = {
+            solution: data.solution,
+            date: data.print_date,
+            day: data.days_since_launch
+        };
+
+        if (!field) {
+            return c.json(allowedFields);
+        }
+
+        if (!(field in allowedFields)) {
+            return c.json({
+                error: `Invalid field requested: ${ field }`
+            }, 400);
+        }
+
+        return c.json({
+            [field]: allowedFields[
+                field as keyof typeof allowedFields
+                ]
+        });
+    } catch (error) {
+        return handleError(c, error as Error);
+    }
+});
+
+app.get("/game", async (c: Context) => {
+
+    return c.json({
+        message: "Wordle Game API endpoints",
+        timezone: "America/Los_Angeles (PST/PDT/UTC-8 by default)",
+        endpoints: [{
+            path: "/valid",
+            description: "Check if a word is valid (5 letters and in dictionary)",
+            usage: "GET /api/game/valid?word=WORDS"
+        },
+            {
+                path: "/check",
+                description: "Check a guess against today's Wordle solution (default timezone is PST/PDT/UTC-8)",
+                usage: "GET /api/game/check?word=WORDS&timestamp=yyyy-mm-dd"
+            },
+            {
+                path: "/playGame",
+                description: "Shows a current Wordle game with previous guesses",
+                usage: "GET /api/game/playGame?word=WORDS&guesses=[[0,1,2,1,0],[2,2,1,0,0]]&timestamp=yyyy-mm-dd"
+            }
+        ]
+    });
+})
+
+app.get("/game/valid", async (c: Context) => {
+    try {
+        let word = c.req.query("word");
+
+        if (!word) {
+            return c.json({
+                error: "Missing parameter word"
+            }, 400);
+        }
+
+        word = cleanWord(word);
+
+        const valid = (await getValidWords()).includes(word);
+
+        return c.json({
+            word,
+            valid
+        });
+    } catch (error) {
+        return handleError(c, error as Error);
+    }
+})
+
+app.get("/game/check", async (c: Context) => {
+    try {
+        let word = c.req.query("word") || "";
+        const timestamp = c.req.query("timestamp");
+
+        if (!word) {
+            return c.json({
+                error: "Missing parameter word"
+            }, 400);
+        }
+
+        word = cleanWord(word);
+
+        const solution = (await getWord(timestamp)).data.solution.toLowerCase();
+
+        const sL = solution.split("");
+        const gL = word.split("");
+        const sY = new Array(5).fill(false);
+
+        const result = checkWord(gL, sL, sY);
+
+        return c.json({
+            guess: word,
+            correct: solution === word,
+            result
+        })
+    }
+
+    catch (error) {
+        return handleError(c, error as Error);
+    }
+})
+
+app.get("/game/playGame", async (c: Context) => {
+    try {
+        let word = c.req.query("word") || "";
+        const prevGuesses = c.req.query("guesses") || "";
+        const timestamp = c.req.query("timestamp");
+
+        if (!word) {
+            return c.json({
+                error: "Missing parameter `word`"
+            }, 400);
+        }
+
+        if (!prevGuesses) {
+            return c.json({
+                error: "Missing parameter `guesses`"
+            }, 400);
+        }
+
+        let guesses: number[][];
+
+        try {
+            guesses = JSON.parse(prevGuesses as string);
+        } catch (parseError) {
+            return c.json({
+                error: "Parameter `guesses` should be a JSON array."
+            }, 400);
+        }
+
+        if (!Array.isArray(guesses) || !guesses.every(row => Array.isArray(row))) {
+            return c.json({
+                error: "Parameter `guesses` should be a 2D array."
+            }, 400);
+        }
+
+        word = cleanWord(word);
+
+        const solution = (await getWord(timestamp)).data.solution.toLowerCase();
+
+        const sL = solution.split("");
+        const gL = word.split("");
+        const sY = new Array(5).fill(false);
+
+        const result = checkWord(gL, sL, sY);
+
+        const updatedGuesses = [...guesses, result];
+
+        return c.json({
+            guesses: updatedGuesses,
+            currentGuess: result,
+            isComplete: result.every(r => r === 0)
+        });
+
+    } catch (error) {
+        return handleError(c, error as Error);
+    }
+});
 
 const handler = handle(app);
 
