@@ -1,4 +1,12 @@
-This is a [honojs/hono](https://hono.dev/) starter kit for deploying on Vercel.
+# Wordle API
+
+This is a simple (but fairly complete) Wordle API built with [Hono](https://hono.dev/) and deployed on Vercel.
+It provides endpoints to get the daily word, check guesses, and retrieve statistics. It uses 2 Mongo DB's to store info
+about the leaderboard and the user's current guesses.
+
+## Hosting
+This API is hosted entirely on Vercel, with 2 MongoDB Atlas DB's for 2 free MongoDB Atlas cluster for data storage.
+https://slack-wordle-api.vercel.app/api
 
 ## Getting Started
 
