@@ -75,7 +75,6 @@ async function getUsersCollection() {
     return mongoUsersClient.db(MONGO_USERS_DB_NAME).collection(MONGO_USERS_COLLECTION_NAME);
 }
 
-// --- Utility functions for wordle logic (unchanged) ---
 async function getWord(timestamp?: string | number | Date) {
     let date: string;
 
@@ -214,18 +213,15 @@ function calculateScore(guesses: number[][]): number {
     return Math.min(partial, 400);
 }
 
-// --- API for Slack bot to submit guess ---
 app.post("/slack-guess", async (c: Context) => {
     try {
         const { userId, guess, timestamp } = await c.req.json();
-
         if (!userId || !guess) {
             return c.json({ error: "Missing userId or guess" }, 400);
         }
         const word = cleanWord(guess);
         const { data, date } = await getWord(timestamp);
 
-        // Validate word
         const validWords = await getValidWords();
         if (!validWords.includes(word)) {
             return c.json({ error: `Word '${word}' is not a valid Wordle guess.` }, 400);
@@ -233,13 +229,21 @@ app.post("/slack-guess", async (c: Context) => {
 
         const usersCol = await getUsersCollection();
         let userEntry = await usersCol.findOne({ userId, date });
-        let guessesArr = userEntry?.guesses || [];
+        let guessesArr: number[][] = userEntry?.guesses || [];
+        let wordsTried: string[] = userEntry?.wordsTried || [];
 
-        // Don't allow more than 6 guesses
-        if (guessesArr.length >= 6) {
+        if (guessesArr.length > 0 &&
+            (guessesArr[guessesArr.length - 1].every((x: number) => x === 0) || guessesArr.length >= 6)) {
             return c.json({
                 response_type: "ephemeral",
-                text: "You've already used all 6 guesses for today!"
+                text: "Game already completed for today! 🎉"
+            }, 200);
+        }
+
+        if (wordsTried && wordsTried.map(w => w.toLowerCase()).includes(word)) {
+            return c.json({
+                response_type: "ephemeral",
+                text: `You've already guessed "${word.toUpperCase()}". Try a different word!`
             }, 200);
         }
 
@@ -250,16 +254,15 @@ app.post("/slack-guess", async (c: Context) => {
 
         const result = checkWord(gL, sL, sY);
         guessesArr.push(result);
+        wordsTried = [...(wordsTried || []), word];
 
-        // Update guesses in DB
         await usersCol.updateOne(
             { userId, date },
-            { $set: { userId, date, guesses: guessesArr } },
+            { $set: { userId, date, guesses: guessesArr, wordsTried } },
             { upsert: true }
         );
 
-        // If completed (win or 6 guesses used), add to leaderboard
-        let win = result.every(x => x === 0);
+        let win = result.every((x: number) => x === 0);
         if (win || guessesArr.length >= 6) {
             const leaderboardCol = await getLeaderboardCollection();
             await leaderboardCol.updateOne(
@@ -269,19 +272,30 @@ app.post("/slack-guess", async (c: Context) => {
             );
         }
 
-        // Format grid for Slack
-        const emoji = [":large_green_square:", ":large_yellow_square:", ":white_large_square:"];
-        const blocks = guessesArr.map((guess: number[]) => ({
-            type: "section",
-            text: { type: "mrkdwn", text: guess.map((val: number) => emoji[val]).join("") }
-        }));
+        const colorSquares = ["🟩", "🟨", "⬜️"];
 
+        const blocks: any[] = guessesArr.map((guess: number[], guessIdx: number) => {
+            const wordTried = (wordsTried[guessIdx] || "").toUpperCase();
+            let lettersLine = "";
+            let squaresLine = "";
+            for (let i = 0; i < guess.length; i++) {
+                lettersLine += `  *${wordTried[i] || " "}*  `;
+                squaresLine += `  ${colorSquares[guess[i]]}  `;
+            }
+            return {
+                type: "section",
+                text: {
+                    type: "mrkdwn",
+                    text: `${lettersLine}\n${squaresLine}`
+                }
+            };
+        });
 
         let doneMsg = "";
         if (win) {
             doneMsg = `:tada: <@${userId}> solved today's Wordle in ${guessesArr.length} guess${guessesArr.length > 1 ? "es" : ""}!`;
         } else if (guessesArr.length >= 6) {
-            doneMsg = `:no_entry: <@${userId}> used all guesses. Try again tomorrow!\n*Solution:* \`${solution}\``;
+            doneMsg = `:no_entry: <@${userId}> used all guesses. Try again tomorrow!\n*Solution:* \`${solution.toUpperCase()}\``;
         } else {
             doneMsg = `Guess submitted. You have used ${guessesArr.length}/6 guesses.`;
         }
