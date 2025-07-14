@@ -4,6 +4,11 @@ import { cors } from "hono/cors"
 import type { Context } from "hono"
 import { MongoClient } from "mongodb"
 
+import dotenv from 'dotenv';
+dotenv.config({
+    path: './.env'
+});
+
 import schedule from "node-schedule"
 
 const app = new Hono().basePath("/api");
