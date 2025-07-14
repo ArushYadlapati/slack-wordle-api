@@ -6,21 +6,25 @@ import { MongoClient } from "mongodb"
 
 const app = new Hono().basePath("/api");
 
-const MONGO_URI = process.env.MONGO_URI || "";
-const DB_NAME = process.env.MONGO_DB_NAME || "";
-const COLLECTION_NAME = process.env.MONGO_URI || "";
+const MONGO_LEADERBOARD_URI = process.env.MONGO_LEADERBOARD_URI || "";
+const MONGO_LEADERBOARD_DB_NAME = process.env.MONGO_LEADERBOARD_DB_NAME || "";
+const MONGO_LEADERBOARD_COLLECTION_NAME = process.env.MONGO_LEADERBOARD_COLLECTION_NAME || "";
+
+const MONGO_USERS_URI = process.env.MONGO_USERS_URI || "";
+const MONGO_USERS_DB_NAME = process.env.MONGO_USERS_DB_NAME || "";
+const MONGO_USERS_COLLECTION_NAME = process.env.MONGO_USERS_COLLECTION_NAME || "";
 
 let mongoClient: MongoClient | null = null;
 async function getMongoClient() {
     if (!mongoClient) {
-        mongoClient = new MongoClient(MONGO_URI);
+        mongoClient = new MongoClient(MONGO_LEADERBOARD_URI);
         await mongoClient.connect();
     }
     return mongoClient;
 }
 async function getLeaderboardCollection() {
     const client = await getMongoClient();
-    return client.db(DB_NAME).collection(COLLECTION_NAME);
+    return client.db(MONGO_LEADERBOARD_DB_NAME).collection(MONGO_LEADERBOARD_COLLECTION_NAME);
 }
 
 app.use("*", cors({
