@@ -4,6 +4,8 @@ import { cors } from "hono/cors"
 import type { Context } from "hono"
 import { MongoClient } from "mongodb"
 
+import schedule from "node-schedule"
+
 const app = new Hono().basePath("/api");
 
 const MONGO_LEADERBOARD_URI = process.env.MONGO_LEADERBOARD_URI || "";
@@ -27,6 +29,31 @@ async function getLeaderboardCollection() {
     return client.db(MONGO_LEADERBOARD_DB_NAME).collection(MONGO_LEADERBOARD_COLLECTION_NAME);
 }
 
+let mongoUsersClient: MongoClient | null = null;
+async function getUsersCollection() {
+    if (!mongoUsersClient) {
+        mongoUsersClient = new MongoClient(MONGO_USERS_URI);
+        await mongoUsersClient.connect();
+    }
+    return mongoUsersClient.db(MONGO_USERS_DB_NAME).collection(MONGO_USERS_COLLECTION_NAME);
+}
+
+schedule.scheduleJob("0 0 * * *", { tz: "America/Los_Angeles" }, async () => {
+    try {
+        if (mongoClient) {
+            const leaderboardCol = await getLeaderboardCollection();
+            await leaderboardCol.deleteMany({});
+        }
+        if (mongoUsersClient) {
+            const usersCol = await getUsersCollection();
+            await usersCol.deleteMany({});
+        }
+        console.log("Leaderboard and users DBs cleared at PST midnight.");
+    } catch (e) {
+        console.error("Failed to clear DBs at PST midnight.", e);
+    }
+});
+
 app.use("*", cors({
     origin: "*",
     allowMethods: ["GET", "POST", "PATCH", "PUT", "OPTIONS"],
@@ -46,10 +73,10 @@ app.get("/", (c: Context) => {
         message: "Wordle Game API",
         timezone: "America/Los_Angeles (PST/PDT, UTC-8 by default)",
         endpoints: [{
-                path: "api/wordle",
-                description: "API Methods to get basic Wordle info",
-                usage: "GET /api/wordle?timestamp=yyyy-mm-dd"
-            },
+            path: "api/wordle",
+            description: "API Methods to get basic Wordle info",
+            usage: "GET /api/wordle?timestamp=yyyy-mm-dd"
+        },
             {
                 path: "api/game",
                 description: "API Methods for the Wordle Game",
@@ -118,8 +145,6 @@ async function getWord(timestamp?: string | number | Date) {
             .split("/");
         date = `${ year }-${ month.padStart(2, "0") }-${ day.padStart(2, "0") }`;
     }
-
-
 
     const res = await fetch(`https://www.nytimes.com/svc/wordle/v2/${ date }.json`);
 
@@ -362,10 +387,10 @@ app.get("/game", async (c: Context) => {
         message: "Wordle Game API endpoints",
         timezone: "America/Los_Angeles (PST/PDT/UTC-8 by default)",
         endpoints: [{
-                path: "/valid",
-                description: "Check if a word is valid (5 letters and in dictionary)",
-                usage: "GET /api/game/valid?word=WORDS"
-            },
+            path: "/valid",
+            description: "Check if a word is valid (5 letters and in dictionary)",
+            usage: "GET /api/game/valid?word=WORDS"
+        },
             {
                 path: "/check",
                 description: "Check a guess against today's Wordle solution (default timezone is PST/PDT/UTC-8)",
